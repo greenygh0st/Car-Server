@@ -1,42 +1,50 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
-// Enter a MAC address and IP address for your controller below.
+#include <Servo.h>
+
+Servo driveservo;
+Servo steeringservo;
+
+// Enter a MAC address, IP address and Portnumber for your Server below.
 // The IP address will be dependent on your local network:
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(192,168,40,177);
+IPAddress serverIP(192,168,1,80);
+int serverPort=8888;
+
+//vars
+const int RedLED = 5;
+const int GreenLED = 2;
+const int YellowLED = 3;
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use
-// (port 80 is default for HTTP):
-EthernetServer server(1500); //for our purposes we will use 1500
+EthernetServer server(serverPort);
 
 void setup()
 {
-  //start serial library
+  // start the serial for debugging
   Serial.begin(9600);
-  
-  //set our pins
-  //LED PINS
-  pinMode(13, OUTPUT); //ONBOARD LED
-  pinMode(9, OUTPUT); //RED LED 
-  pinMode(8, OUTPUT); //GREEN LED
-  
-  //DRIVE PINS
-  pinMode(2, OUTPUT); //FORWARD
-  pinMode(3, OUTPUT); //BACK
-  pinMode(5, OUTPUT); //LEFT
-  pinMode(6, OUTPUT); //RIGHT
-  
-  //turn on RED LED
-  digitalWrite(9, HIGH);
-  
-  //make sure greed led is off
-  digitalWrite(8, LOW);
-  
+  //setup LEDs
+  pinMode(13, OUTPUT); //onboard LED
+  pinMode(GreenLED, OUTPUT); //GREEN LED
+  pinMode(RedLED, OUTPUT); //RED LED
+  pinMode(YellowLED, OUTPUT);
+  digitalWrite(GreenLED, LOW);
+  digitalWrite(RedLED, LOW);
+  digitalWrite(YellowLED, LOW);
   // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip);
+  Ethernet.begin(mac, serverIP);
   server.begin();
+  Serial.println("Car controller started...");//log
+  digitalWrite(13, HIGH);
+  //Connect to the cars servos
+  /*
+  Steering 1000 = Left, 1500 = Center, 2000 = right
+  Drive 1000 = Forward, Reverse = ??
+  */
+  driveservo.attach(8);
+  steeringservo.attach(9);
 }
 
 void loop()
@@ -44,43 +52,81 @@ void loop()
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
+    String clientMsg ="";
     while (client.connected()) {
-      //turn on green light/turn off red light
-      digitalWrite(9, LOW);      
-      digitalWrite(8, HIGH);
+      digitalWrite(GreenLED, HIGH);
       if (client.available()) {
-        Serial.println("Client Available--");
-        //
-        int driveMe = client.read();               
-        //so right here is where we are going to tell the car what
-        //to do based on the information being sent
-        Serial.println("Char: " + driveMe);
-        drive(driveMe);
+        Serial.println("Client available...");
+        char c = client.read();
+        //Serial.print(c);
+        if (c != '\n')
+        {
+          clientMsg+=c;//store the recieved chracters in a string
+        }
+        //if the character is an "end of line" the whole message is recieved
+        if (c == '\n') {
+          Serial.println("Message from Client: "+clientMsg+"\n");//print it to the serial
+          client.println("You said:"+clientMsg);//modify the string and send it back
+          digitalWrite(YellowLED, LOW);
+          clientMsg.trim();
+          if (clientMsg == "SS")
+          {
+            digitalWrite(RedLED, HIGH);
+            Serial.println("ALL STOP COMMAND RECIEVED!");
+            steeringservo.writeMicroseconds(1500);
+            driveservo.writeMicroseconds(0);
+          } else if (clientMsg == "FF") //forward straight
+          {
+            steeringservo.writeMicroseconds(1500);
+            digitalWrite(RedLED, LOW);
+            digitalWrite(YellowLED, HIGH);
+            driveservo.writeMicroseconds(1000);
+            Serial.println("FORWARD COMMAND RECIEVED!");
+          } else if (clientMsg == "FL") //forward left
+          {
+            digitalWrite(RedLED, LOW);
+            digitalWrite(YellowLED, HIGH);
+            driveservo.writeMicroseconds(1000);
+            steeringservo.writeMicroseconds(1000);
+            Serial.println("FORWARD LEFT COMMAND RECIEVED!");
+          } else if (clientMsg == "FR") //forward right
+          {
+            digitalWrite(RedLED, LOW);
+            digitalWrite(YellowLED, HIGH);
+            driveservo.writeMicroseconds(1000);
+            steeringservo.writeMicroseconds(2000);
+            Serial.println("FORWARD RIGHT COMMAND RECIEVED!");
+          } else if (clientMsg == "LL") //left no forward drive
+          {
+            digitalWrite(RedLED, LOW);
+            digitalWrite(YellowLED, HIGH);
+            steeringservo.writeMicroseconds(1000);
+            Serial.println("FORWARD RIGHT COMMAND RECIEVED!");
+          } else if (clientMsg == "RR") //right no forward drive
+          {
+            digitalWrite(RedLED, LOW);
+            digitalWrite(YellowLED, HIGH);
+            steeringservo.writeMicroseconds(2000);
+            Serial.println("FORWARD RIGHT COMMAND RECIEVED!");
+          }
+          else
+          {
+            Serial.println("UN-USED COMMAND RECIEVED!");
+            digitalWrite(YellowLED, HIGH); 
+          }
+          clientMsg=""; //clear client msg
+        }
       }
-      //turn RED light back on if the client is not connected
-      digitalWrite(9, HIGH);
-      digitalWrite(8, LOW);      
+      steeringservo.writeMicroseconds(1500);
+      driveservo.writeMicroseconds(0);
     }
-    //turn RED light back on if the client is not connected
-    digitalWrite(9, HIGH);
-    digitalWrite(8, LOW);
-    //turn on red light/turn off green light    
-    delay(1);//time to recieve data
-    // close the connection: (after the client disconnects)
+    // give the Client time to receive the data
+    delay(1);
+    // close the connection:
+    Serial.println("Client disconnected!");
+    digitalWrite(GreenLED, LOW);
+    digitalWrite(RedLED, LOW);
+    digitalWrite(YellowLED, LOW);
     client.stop();
   }
 }
-void drive(int dNumber)
-{
-  if (dNumber == 1)
-  {
-    digitalWrite(2, HIGH);
-  }
-  delay(2000);
-  //end the function by reseting the pin outputs
-  digitalWrite(2, LOW);
-  digitalWrite(3, LOW);
-  digitalWrite(5, LOW);
-  digitalWrite(6, LOW);
-}
-
